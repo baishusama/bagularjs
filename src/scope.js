@@ -17,11 +17,11 @@ Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
         last: initWatchVal,
         valueEq: !!valueEq
     };
-    self.$$watchers.unshift(watcher);
+    self.$$watchers.push(watcher); // !!: instead of unshift
     self.$$lastDirtyWatch = null; // 防止新添加的 watcher 被短路
 
     return function() {
-        var index = self.$$watchers.indexOf(watcher); // TODO: 不利于垃圾回收？
+        var index = self.$$watchers.indexOf(watcher);
         if (index >= 0) {
             /**
              * `if` to avoid more than one call
@@ -29,8 +29,8 @@ Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
              *   - 2nd call, watch not found => index === -1
              * & NOTE: how will `splice` behave when index === -1
              */
-            self.$$watchers.splice(index, 1);
-            self.$$lastDirtyWatch = null; // 以避免 remove 后续错位重复执行某 watcher 产生的意外短路
+            // !!: instead of `splice`ing here, `splice` in the end of $digest
+            self.$$watchers[index] = null;
         }
     };
 };
@@ -50,7 +50,7 @@ Scope.prototype.$$areEqual = function(newValue, oldValue, valueEq) {
 Scope.prototype.$$digestOnce = function() {
     var self = this;
     var newValue, oldValue, dirty;
-    _.forEachRight(self.$$watchers, function(watcher) {
+    _.forEach(self.$$watchers, function(watcher) { // !!: instead of forEachRight
         try {
             if (watcher) {
                 newValue = watcher.watchFn(self);
@@ -67,7 +67,6 @@ Scope.prototype.$$digestOnce = function() {
                         self
                     );
                 } else if (watcher === self.$$lastDirtyWatch) {
-                    // self.$$lastDirtyWatch = null; // unnecessary for outer null initialization
                     return false;
                 }
             }
@@ -89,6 +88,16 @@ Scope.prototype.$digest = function() {
             throw '10 digest iterations reached'; // new Error('..oops there is an infinite loop!');
         }
     } while (dirty);
+    /**
+     * !!: 在遍历完之后，对 $$watchers 做清理（真正的 splice）
+     * 这样就不会有 由于数组错位引起 的各种 corner case，也更便于理解
+     */
+    var self = this;
+    _.forEachRight(self.$$watchers, function(watcher, index){
+        if(!watcher){
+            self.$$watchers.splice(index, 1);
+        }
+    });
 };
 
 module.exports = Scope;
